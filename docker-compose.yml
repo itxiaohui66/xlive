@@ -1,0 +1,95 @@
+name: xlive
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: xlive
+      POSTGRES_USER: xlive
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-xlive_dev_password}
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xlive -d xlive"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes: [redis_data:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  srs:
+    image: ossrs/srs:6
+    command: ["sh", "-c", "sed \"s|__HOOK_SECRET__|$${SRS_HOOK_SECRET}|g\" /usr/local/srs/conf/xlive.template.conf > /tmp/xlive.conf && exec ./objs/srs -c /tmp/xlive.conf"]
+    environment:
+      SRS_HOOK_SECRET: ${SRS_HOOK_SECRET}
+    volumes:
+      - ./infra/srs/srs.conf:/usr/local/srs/conf/xlive.template.conf:ro
+      - srs_hls:/usr/local/srs/objs/nginx/html/live
+    ports:
+      - "1935:1935"
+    expose: ["1985", "8080"]
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+  srs2:
+    image: ossrs/srs:6
+    command: ["sh", "-c", "exec ./objs/srs -c /usr/local/srs/conf/srs2.conf"]
+    volumes:
+      - ./infra/srs/srs2.conf:/usr/local/srs/conf/srs2.conf:ro
+      - srs_hls:/usr/local/srs/objs/nginx/html/live
+    expose: ["1936", "8081"]
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgresql://xlive:${POSTGRES_PASSWORD:-xlive_dev_password}@postgres:5432/xlive?schema=public
+      REDIS_URL: redis://redis:6379
+      APP_PORT: 3000
+      UPLOAD_DIR: /app/uploads
+      LIVE_DIR: /app/live
+    volumes: [uploads:/app/uploads, srs_hls:/app/live]
+    expose: ["3000"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    expose: ["80"]
+    restart: unless-stopped
+  nginx:
+    image: nginx:1.27-alpine
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./infra/nginx/certs:/etc/nginx/certs:ro
+      - uploads:/var/www/uploads:ro
+      - srs_hls:/var/www/live:ro
+    depends_on: [web, api, srs]
+    restart: unless-stopped
+volumes:
+  postgres_data:
+  redis_data:
+  uploads:
+  srs_hls:

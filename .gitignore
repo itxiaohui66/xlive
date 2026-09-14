@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+uploads/*
+!uploads/.gitkeep
+coverage/
+*.log
+.idea/
+.vscode/
+apps/api/prisma/dev.db
+infra/nginx/certs/
+
+# 本地临时文件与数据库备份，绝不提交
+.tmp-*
+*.dump
