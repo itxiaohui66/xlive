@@ -1,0 +1,15 @@
+services:
+  api:
+    build:
+      target: dev
+    command: npm run dev -w @xlive/api
+    volumes:
+      - ./apps/api/src:/app/apps/api/src
+      - ./apps/api/prisma:/app/apps/api/prisma
+  web:
+    build:
+      target: dev
+    command: npm run dev -w @xlive/web -- --host 0.0.0.0
+    volumes:
+      - ./apps/web/src:/app/apps/web/src
+    ports: ["5173:5173"]

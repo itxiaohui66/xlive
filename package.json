@@ -1,0 +1,14 @@
+{
+  "name": "xlive",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"npm run dev -w @xlive/api\" \"npm run dev -w @xlive/web\"",
+    "build": "npm run build -w @xlive/api && npm run build -w @xlive/web",
+    "test": "npm run test -w @xlive/api && npm run test -w @xlive/web",
+    "lint": "npm run lint -ws --if-present"
+  },
+  "devDependencies": {"concurrently": "^9.2.1"},
+  "engines": {"node": ">=22"}
+}

@@ -1,0 +1,332 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+  DELETED
+}
+
+enum RoleName {
+  USER
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum RoomVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum StreamStatus {
+  OFFLINE
+  LIVE
+  BANNED
+}
+
+enum CodePurpose {
+  REGISTER
+  LOGIN
+  RESET_PASSWORD
+}
+
+enum CodeChannel {
+  EMAIL
+  SMS
+}
+
+enum BanType {
+  LOGIN
+  CHAT
+  STREAM
+}
+
+enum AdminResult {
+  SUCCESS
+  FAILURE
+}
+
+model User {
+  id               String         @id @default(uuid()) @db.Uuid
+  username         String         @unique @db.VarChar(32)
+  nickname         String         @db.VarChar(64)
+  avatar           String?        @db.VarChar(500)
+  bio              String?        @db.VarChar(500)
+  email            String?        @unique @db.VarChar(254)
+  phone            String?        @unique @db.VarChar(32)
+  passwordHash     String         @map("password_hash")
+  status           UserStatus     @default(ACTIVE)
+  canStream        Boolean        @default(false) @map("can_stream")
+  registerIp       String?        @map("register_ip") @db.VarChar(64)
+  lastLoginIp      String?        @map("last_login_ip") @db.VarChar(64)
+  lastLoginAt      DateTime?      @map("last_login_at")
+  failedLoginCount Int            @default(0) @map("failed_login_count")
+  lockedUntil      DateTime?      @map("locked_until")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+  roles            UserRole[]
+  rooms            Room[]
+  refreshTokens    RefreshToken[]
+  chatMessages     ChatMessage[]
+  bans             Ban[]          @relation("BannedUser")
+  bansIssued       Ban[]          @relation("IssuedBy")
+  adminLogs        AdminLog[]
+  loginLogs        LoginLog[]
+  uploads          Upload[]
+  sentNotices      Notice[]      @relation("NoticeFrom")
+
+  @@index([createdAt])
+  @@map("users")
+}
+
+model Role {
+  id          Int        @id @default(autoincrement())
+  name        RoleName   @unique
+  description String?
+  users       UserRole[]
+
+  @@map("roles")
+}
+
+model UserRole {
+  userId String @map("user_id") @db.Uuid
+  roleId Int    @map("role_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model Room {
+  id              String         @id @default(uuid()) @db.Uuid
+  ownerId         String         @map("owner_id") @db.Uuid
+  roomNumber      Int            @unique @default(autoincrement()) @map("room_number")
+  title           String         @db.VarChar(120)
+  description     String?        @db.VarChar(1000)
+  cover           String?        @db.VarChar(500)
+  announcement    String?        @db.VarChar(1000)
+  visibility      RoomVisibility @default(PUBLIC)
+  streamStatus    StreamStatus   @default(OFFLINE) @map("stream_status")
+  viewerCount     Int            @default(0) @map("viewer_count")
+  showViewerCount Boolean        @default(true) @map("show_viewer_count")
+  featured        Boolean        @default(false)
+  liveBanned      Boolean        @default(false) @map("live_banned")
+  recordReplay    Boolean        @default(true) @map("record_replay")
+  lastLiveAt      DateTime?      @map("last_live_at")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+  owner           User           @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  categoryId      Int?           @map("category_id")
+  category        Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  streamKey       StreamKey?
+  sessions        LiveSession[]
+  chatMessages    ChatMessage[]
+
+  @@index([streamStatus, visibility])
+  @@index([ownerId])
+  @@index([categoryId])
+  @@map("rooms")
+}
+
+model StreamKey {
+  id        String    @id @default(uuid()) @db.Uuid
+  roomId    String    @unique @map("room_id") @db.Uuid
+  keyHash   String    @unique @map("key_hash") @db.VarChar(64)
+  keyCipher String    @map("key_cipher")
+  keyHint   String    @map("key_hint") @db.VarChar(12)
+  version   Int       @default(1)
+  createdAt DateTime  @default(now()) @map("created_at")
+  rotatedAt DateTime? @map("rotated_at")
+  room      Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@map("stream_keys")
+}
+
+model LiveSession {
+  id              String    @id @default(uuid()) @db.Uuid
+  roomId          String    @map("room_id") @db.Uuid
+  streamName      String    @map("stream_name") @db.VarChar(128)
+  srsClientId     String?   @map("srs_client_id") @db.VarChar(64)
+  startedAt       DateTime  @default(now()) @map("started_at")
+  endedAt         DateTime? @map("ended_at")
+  durationSeconds Int?      @map("duration_seconds")
+  peakViewers     Int       @default(0) @map("peak_viewers")
+  viewerSeconds   BigInt    @default(0) @map("viewer_seconds")
+  viewerSamples   Int       @default(0) @map("viewer_samples")
+  totalViews      Int       @default(0) @map("total_views")
+  recordingUrl    String?   @map("recording_url") @db.VarChar(500)
+  recordingSize   BigInt?   @map("recording_size")
+  recordEnabled   Boolean   @default(true) @map("record_enabled")
+  room            Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  chatMessages    ChatMessage[]
+
+  @@index([roomId, startedAt])
+  @@index([endedAt])
+  @@map("live_sessions")
+}
+
+model Notice {
+  id        String    @id @default(uuid()) @db.Uuid
+  fromId    String    @map("from_id") @db.Uuid
+  from      User      @relation("NoticeFrom", fields: [fromId], references: [id], onDelete: Cascade)
+  content   String    @db.VarChar(1000)
+  status    String    @default("PENDING") @db.VarChar(16)
+  createdAt DateTime  @default(now()) @map("created_at")
+  handledAt DateTime? @map("handled_at")
+  handledBy String?   @map("handled_by") @db.Uuid
+
+  @@index([status, createdAt])
+  @@map("notices")
+}
+
+model Upload {
+  id           String   @id @default(uuid()) @db.Uuid
+  filename     String   @db.VarChar(255)
+  originalName String?  @map("original_name") @db.VarChar(255)
+  mimeType     String   @map("mime_type") @db.VarChar(64)
+  size         Int
+  uploaderId   String?  @map("uploader_id") @db.Uuid
+  uploader     User?    @relation(fields: [uploaderId], references: [id], onDelete: SetNull)
+  url          String   @db.VarChar(500)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("uploads")
+}
+
+model Category {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique @db.VarChar(64)
+  slug      String   @unique @db.VarChar(64)
+  icon      String?  @db.VarChar(128)
+  sort      Int      @default(0)
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  rooms     Room[]
+
+  @@index([enabled, sort])
+  @@map("categories")
+}
+
+model VerificationCode {
+  id          String      @id @default(uuid()) @db.Uuid
+  channel     CodeChannel
+  targetHash  String      @map("target_hash") @db.VarChar(64)
+  codeHash    String      @map("code_hash") @db.VarChar(64)
+  purpose     CodePurpose
+  attempts    Int         @default(0)
+  maxAttempts Int         @default(5) @map("max_attempts")
+  expiresAt   DateTime    @map("expires_at")
+  usedAt      DateTime?   @map("used_at")
+  ip          String?     @db.VarChar(64)
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  @@index([targetHash, purpose, expiresAt])
+  @@map("verification_codes")
+}
+
+model SystemSetting {
+  key         String   @id @db.VarChar(128)
+  value       String
+  group       String   @db.VarChar(64)
+  sensitive   Boolean  @default(false)
+  description String?
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  updatedBy   String?  @map("updated_by") @db.Uuid
+
+  @@index([group])
+  @@map("system_settings")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash") @db.VarChar(64)
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  ip        String?   @db.VarChar(64)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("refresh_tokens")
+}
+
+model AdminLog {
+  id         BigInt      @id @default(autoincrement())
+  adminId    String      @map("admin_id") @db.Uuid
+  action     String      @db.VarChar(128)
+  targetType String?     @map("target_type") @db.VarChar(64)
+  targetId   String?     @map("target_id") @db.VarChar(128)
+  details    Json?
+  result     AdminResult
+  ip         String?     @db.VarChar(64)
+  requestId  String?     @map("request_id") @db.VarChar(64)
+  createdAt  DateTime    @default(now()) @map("created_at")
+  admin      User        @relation(fields: [adminId], references: [id], onDelete: Restrict)
+
+  @@index([adminId, createdAt])
+  @@index([action, createdAt])
+  @@map("admin_logs")
+}
+
+model LoginLog {
+  id        BigInt   @id @default(autoincrement())
+  userId    String?  @map("user_id") @db.Uuid
+  account   String   @db.VarChar(254)
+  success   Boolean
+  reason    String?  @db.VarChar(128)
+  ip        String?  @db.VarChar(64)
+  userAgent String?  @map("user_agent") @db.VarChar(500)
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([account, createdAt])
+  @@index([ip, createdAt])
+  @@map("login_logs")
+}
+
+model ChatMessage {
+  id        String    @id @default(uuid()) @db.Uuid
+  roomId    String    @map("room_id") @db.Uuid
+  userId    String?   @map("user_id") @db.Uuid
+  sessionId String?   @map("session_id") @db.Uuid
+  offsetSeconds Float? @map("offset_seconds")
+  nickname  String    @db.VarChar(64)
+  avatar    String?   @db.VarChar(500)
+  content   String    @db.VarChar(500)
+  deletedAt DateTime? @map("deleted_at")
+  deletedBy String?   @map("deleted_by") @db.Uuid
+  createdAt DateTime  @default(now()) @map("created_at")
+  room      Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  session   LiveSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([roomId, createdAt])
+  @@index([sessionId, offsetSeconds])
+  @@map("chat_messages")
+}
+
+model Ban {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  type      BanType
+  reason    String?   @db.VarChar(500)
+  expiresAt DateTime? @map("expires_at")
+  createdBy String    @map("created_by") @db.Uuid
+  createdAt DateTime  @default(now()) @map("created_at")
+  revokedAt DateTime? @map("revoked_at")
+  user      User      @relation("BannedUser", fields: [userId], references: [id], onDelete: Cascade)
+  issuer    User      @relation("IssuedBy", fields: [createdBy], references: [id], onDelete: Restrict)
+
+  @@index([userId, type, expiresAt])
+  @@map("bans")
+}
